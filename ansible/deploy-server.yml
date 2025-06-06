@@ -108,3 +108,46 @@
         msg: "{{ tomcat_version.stdout }}"
       when: version_script.stat.exists
 
+    - name: Copy WAR file to Tomcat webapps directory
+      copy:
+        src: ./artifacts/WebAppCal-1.3.5.war
+        dest: /opt/tomcat/latest/webapps/WebAppCal.war
+        owner: tomcat
+        group: tomcat
+        mode: '0644'
+
+    - name: Restart Tomcat to deploy new WAR
+      systemd:
+        name: tomcat
+        state: restarted
+
+    - name: Wait for application to be accessible
+      uri:
+        url: "http://localhost:8080/WebAppCal/"
+        status_code: 200
+        timeout: 60
+      register: app_status
+      retries: 5
+      delay: 10
+      until: app_status.status == 200
+
+    - name: Log deployment timestamp
+      command: date
+      register: deploy_time
+
+    - name: Show deployment timestamp
+      debug:
+        msg: "Application deployed successfully at {{ deploy_time.stdout }}"
+
+    - name: Perform final application check
+      uri:
+        url: "http://localhost:8080/WebAppCal/"
+        return_content: yes
+      register: final_check
+
+    - name: Show verification summary
+      debug:
+        msg: >
+          Final check status: {{ final_check.status }}.
+          Response snippet: {{ final_check.content | regex_replace('\n', ' ') | truncate(300) }}   
+

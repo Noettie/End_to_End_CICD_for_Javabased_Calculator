@@ -27,3 +27,44 @@
     - debug:
         msg: "{{ maven_version.stdout }}"
 
+    - name: Install Git
+      become: yes
+      yum:
+        name: git
+        state: present
+
+    - name: Build Java WAR file using Maven
+      command: mvn clean package
+      args:
+        chdir: /home/ec2-user/End_to_End_CICD_for_Javabased_Calculator
+      register: build_output
+      become: false
+
+    - name: Show build output
+      debug:
+        msg: "{{ build_output.stdout }}"
+
+    - name: Fetch WAR file to control node
+      fetch:
+        src: /home/ec2-user/End_to_End_CICD_for_Javabased_Calculator/target/WebAppCal-1.3.5.war
+        dest: ./artifacts/
+        flat: yes
+
+    - name: Check if WAR file still exists
+      stat:
+        path: /home/ec2-user/End_to_End_CICD_for_Javabased_Calculator/target/WebAppCal-1.3.5.war
+      register: war_status
+      
+    - debug:
+        msg: "WAR file exists on build server: {{ war_status.stat.exists }}"
+
+    - name: Log Maven build info
+      command: mvn help:evaluate -Dexpression=project.version -q -DforceStdout
+      args:
+        chdir: /home/ec2-user/End_to_End_CICD_for_Javabased_Calculator
+      register: maven_version
+      changed_when: false
+
+    - debug:
+        msg: "Maven project version is {{ maven_version.stdout }}"
+

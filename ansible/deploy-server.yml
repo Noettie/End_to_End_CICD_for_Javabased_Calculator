@@ -1,0 +1,110 @@
+---
+- name: Install Apache Tomcat 8.5.97
+  hosts: deploy_servers
+  become: yes
+
+  vars:
+    tomcat_version: 8.5.97
+    install_dir: /opt/tomcat
+    tomcat_user: tomcat
+
+  tasks:
+
+    - name: Install Java (OpenJDK 8)
+      yum:
+        name: java-1.8.0-openjdk
+        state: present
+
+    - name: Create a dedicated Tomcat user
+      user:
+        name: "{{ tomcat_user }}"
+        shell: /bin/false
+
+    - name: Download Tomcat archive
+      get_url:
+        url: "https://archive.apache.org/dist/tomcat/tomcat-8/v{{ tomcat_version }}/bin/apache-tomcat-{{ tomcat_version }}.tar.gz"
+        dest: /tmp/apache-tomcat-{{ tomcat_version }}.tar.gz
+
+    - name: Create Tomcat installation directory
+      file:
+        path: "{{ install_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Extract Tomcat archive
+      unarchive:
+        src: /tmp/apache-tomcat-{{ tomcat_version }}.tar.gz
+        dest: "{{ install_dir }}"
+        remote_src: yes
+        creates: "{{ install_dir }}/apache-tomcat-{{ tomcat_version }}"
+
+    - name: Symlink to /opt/tomcat
+      file:
+        src: "{{ install_dir }}/apache-tomcat-{{ tomcat_version }}"
+        dest: "{{ install_dir }}/latest"
+        state: link
+
+    - name: Change ownership of the Tomcat files
+      file:
+        path: "{{ install_dir }}/apache-tomcat-{{ tomcat_version }}"
+        state: directory
+        recurse: yes
+        owner: "{{ tomcat_user }}"
+        group: "{{ tomcat_user }}"
+
+    - name: Create systemd service for Tomcat
+      copy:
+        dest: /etc/systemd/system/tomcat.service
+        content: |
+          [Unit]
+          Description=Apache Tomcat Web Application Container
+          After=network.target
+
+          [Service]
+          Type=forking
+
+          User={{ tomcat_user }}
+          Group={{ tomcat_user }}
+          Environment=JAVA_HOME=/usr/lib/jvm/jre
+          Environment=CATALINA_PID={{ install_dir }}/latest/temp/tomcat.pid
+          Environment=CATALINA_HOME={{ install_dir }}/latest
+          Environment=CATALINA_BASE={{ install_dir }}/latest
+          ExecStart={{ install_dir }}/latest/bin/startup.sh
+          ExecStop={{ install_dir }}/latest/bin/shutdown.sh
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Tomcat
+      systemd:
+        name: tomcat
+        state: started
+        enabled: yes
+
+    - name: Check if Tomcat version script exists
+      stat:
+        path: "{{ install_dir }}/latest/bin/version.sh"
+      register: version_script
+
+    - name: Fail if Tomcat version script is missing
+      fail:
+        msg: "Tomcat version script not found at {{ install_dir }}/latest/bin/version.sh"
+      when: not version_script.stat.exists
+
+    - name: Verify Tomcat installation
+      command: "{{ install_dir }}/latest/bin/version.sh"
+      register: tomcat_version
+      changed_when: false
+      when: version_script.stat.exists
+
+    - debug:
+        msg: "{{ tomcat_version.stdout }}"
+      when: version_script.stat.exists
+

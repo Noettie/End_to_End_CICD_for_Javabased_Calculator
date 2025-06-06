@@ -1,0 +1,29 @@
+---
+- name: Configure Build Server (Maven)
+  hosts: build_servers
+  become: yes
+
+  tasks:
+    - name: Update all packages
+      yum:
+        name: '*'
+        state: latest
+
+    - name: Install Java OpenJDK 1.8
+      yum:
+        name: java-1.8.0-openjdk-devel
+        state: present
+
+    - name: Install Maven
+      yum:
+        name: maven
+        state: present
+
+    - name: Verify Maven installation
+      command: mvn -version
+      register: maven_version
+      changed_when: false
+
+    - debug:
+        msg: "{{ maven_version.stdout }}"
+

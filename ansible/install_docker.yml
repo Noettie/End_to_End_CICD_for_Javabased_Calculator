@@ -1,0 +1,52 @@
+---
+- name: Install Docker on EC2 Tomcat Server
+  hosts: build_servers
+  become: true
+
+  tasks:
+    - name: Remove old Docker repo files if present
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/yum.repos.d/docker-ce.repo
+        - /etc/yum.repos.d/docker-ce-stable.repo
+        - /etc/yum.repos.d/docker.repo
+      ignore_errors: yes
+
+    - name: Clean yum cache
+      command: yum clean all
+
+    - name: Enable Docker package from amazon-linux-extras
+      command: amazon-linux-extras enable docker
+
+    - name: Install Docker package
+      yum:
+        name: docker
+        state: present
+
+    - name: Enable Docker service to start on boot
+      systemd:
+        name: docker
+        enabled: yes
+
+    - name: Start Docker service
+      systemd:
+        name: docker
+        state: started
+
+    - name: Add ec2-user to docker group
+      user:
+        name: ec2-user
+        groups: docker
+        append: yes
+
+    - name: Check Docker version
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Show Docker version
+      debug:
+        msg: "{{ docker_version.stdout }}"
+

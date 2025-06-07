@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = 'nottiey/javacal-webapp'
+        IMAGE_NAME = 'nottiey/petra-webapp'
         TAG = 'latest'
         REMOTE_USER = 'ec2-user'
         REMOTE_HOST = '18.191.145.79'
@@ -46,9 +46,9 @@ pipeline {
                     sh """
 ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST << EOF
 docker pull $IMAGE_NAME:$TAG
-docker stop webapp || true
-docker rm webapp || true
-docker run -d -p $REMOTE_DOCKER_PORT:8080 --name webapp $IMAGE_NAME:$TAG
+docker stop petra-webapp || true
+docker rm petra-webapp || true
+docker run -d -p $REMOTE_DOCKER_PORT:8080 --name petra-webapp $IMAGE_NAME:$TAG
 EOF
                     """
                 }

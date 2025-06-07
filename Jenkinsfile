@@ -2,70 +2,77 @@ pipeline {
     agent any
 
     environment {
-        // Path to your SSH private key for Ansible
-        SSH_PRIVATE_KEY = '/home/ec2-user/.ssh/petra-hs-project.pem'
-        INVENTORY_FILE = 'inventory.ini'
+        IMAGE_NAME = 'nottiey/javacal-webapp'
+        TAG = 'latest'
+        REMOTE_USER = 'ec2-user'
+        REMOTE_HOST = '18.191.145.79'
+        REMOTE_DOCKER_PORT = '8083'
+        SSH_CRED_ID = 'tomcat-ssh-key'
     }
 
     stages {
-        stage('Checkout') {
+        stage('Clone Code') {
             steps {
-                // Checkout your Terraform + Ansible repo
-                checkout scm
+                git branch: 'project-1', url: 'https://github.com/nottie-noe/proj-mdp-152-155.git'
             }
         }
 
-        stage('Terraform Init') {
+        stage('Build with Maven (in Docker)') {
             steps {
-                dir('terraform') {
-                    sh 'terraform init'
+                sh 'docker run --rm -v "$PWD":/app -w /app maven:3.8.1-openjdk-8 mvn clean package'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t $IMAGE_NAME:$TAG .'
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push $IMAGE_NAME:$TAG
+                    '''
                 }
             }
         }
 
-        stage('Terraform Apply') {
+        stage('Deploy to Tomcat Server') {
             steps {
-                dir('terraform') {
-                    sh 'terraform apply -auto-approve'
-                }
-            }
-        }
-
-        stage('Generate Inventory') {
-            steps {
-                // Create inventory.ini dynamically from Terraform outputs
-                script {
-                    def build_ip = sh(script: "terraform output -raw build_server_ip", returnStdout: true).trim()
-                    def deploy_ip = sh(script: "terraform output -raw deploy_server_ip", returnStdout: true).trim()
-
-                    writeFile file: "${env.INVENTORY_FILE}", text: """
-                    [build_servers]
-                    ${build_ip} ansible_user=ec2-user ansible_ssh_private_key_file=${env.SSH_PRIVATE_KEY}
-
-                    [deploy_servers]
-                    ${deploy_ip} ansible_user=ec2-user ansible_ssh_private_key_file=${env.SSH_PRIVATE_KEY}
+                sshagent(credentials: [env.SSH_CRED_ID]) {
+                    sh """
+ssh -o StrictHostKeyChecking=no $REMOTE_USER@$REMOTE_HOST << EOF
+docker pull $IMAGE_NAME:$TAG
+docker stop webapp || true
+docker rm webapp || true
+docker run -d -p $REMOTE_DOCKER_PORT:8080 --name webapp $IMAGE_NAME:$TAG
+EOF
                     """
                 }
-            }
-        }
-
-        stage('Run Ansible - Build Server') {
-            steps {
-                sh "ansible-playbook -i ${env.INVENTORY_FILE} build-server.yml"
-            }
-        }
-
-        stage('Run Ansible - Deploy Server') {
-            steps {
-                sh "ansible-playbook -i ${env.INVENTORY_FILE} deploy-server.yml"
             }
         }
     }
 
     post {
-        always {
-            echo "Pipeline finished."
+        success {
+            echo "✅ Deployment successful! App should be live at http://$REMOTE_HOST:$REMOTE_DOCKER_PORT"
+
+            // Email success
+            mail to: 'thandonoe.ndlovu@gmail.com',
+                 subject: "SUCCESS: Jenkins Build #${env.BUILD_NUMBER}",
+                 body: "The Jenkins build was successful.\nApplication deployed at: http://$REMOTE_HOST:$REMOTE_DOCKER_PORT"
+        }
+
+        failure {
+            echo "❌ Pipeline failed!"
+
+            // Email failure
+            mail to: 'thandonoe.ndlovu@gmail.com',
+                 subject: "FAILURE: Jenkins Build #${env.BUILD_NUMBER}",
+                 body: "The Jenkins build has failed. Please investigate the job: ${env.BUILD_URL}"
         }
     }
 }
-

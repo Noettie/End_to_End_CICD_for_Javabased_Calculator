@@ -13,7 +13,7 @@ pipeline {
     stages {
         stage('Clone Code') {
             steps {
-                git branch: 'project-1', url: 'https://github.com/nottie-noe/proj-mdp-152-155.git'
+                git branch: 'project-1', url: 'https://github.com/Noettie/End_to_End_CICD_for_Javabased_Calculator.git'
             }
         }
 

@@ -58,7 +58,7 @@ EOF
 
     post {
         success {
-            echo "✅ Deployment successful! App should be live at http://$REMOTE_HOST:$REMOTE_DOCKER_PORT"
+            echo "✅ Deployment of containerized application successful! App should be live at http://$REMOTE_HOST:$REMOTE_DOCKER_PORT"
 
             // Email success
             mail to: 'thandonoe.ndlovu@gmail.com',

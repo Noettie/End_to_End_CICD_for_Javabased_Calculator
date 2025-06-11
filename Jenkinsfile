@@ -63,7 +63,7 @@ EOF
             // Email success
             mail to: 'thandonoe.ndlovu@gmail.com',
                  subject: "SUCCESS: Jenkins Build #${env.BUILD_NUMBER}",
-                 body: "The Jenkins build was successful.\nApplication deployed at: http://$REMOTE_HOST:$REMOTE_DOCKER_PORT"
+                 body: "The Jenkins build and deploy of the containerized application was successful.\nThe application is deployed at: http://$REMOTE_HOST:$REMOTE_DOCKER_PORT"
         }
 
         failure {

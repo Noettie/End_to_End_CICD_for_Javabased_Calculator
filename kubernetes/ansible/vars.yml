@@ -1,0 +1,23 @@
+---
+# Cluster configuration
+cluster_name: "petra-hs-cluster.k8s.local"
+state_store: "s3://petra-kops-state-bucket-12345"
+aws_region: "us-east-2"
+zones: "us-east-2a,us-east-2b,us-east-2c"
+kubernetes_version: "1.32.4"
+network_cidr: "172.20.0.0/16"
+topology: "private"
+networking: "calico"
+
+# Node configuration
+master_count: 3
+node_count: 3
+master_instance_type: "t3.medium"  # Default, not specified in config
+node_instance_type: "t3.medium"    # Default, not specified in config
+
+# Security
+ssh_key_path: "/home/ec2-user/.ssh/kops-rsa"
+
+# Cloud labels
+cloud_labels:
+  Environment: "Prod"

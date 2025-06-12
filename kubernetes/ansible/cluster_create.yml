@@ -1,0 +1,67 @@
+- name: Check if the cluster already exists
+  command: >
+    kops get cluster --name=petra-hs-cluster.k8s.local --state=s3://petra-kops-state-bucket-12345
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_SESSION_TOKEN: "{{ lookup('env', 'AWS_SESSION_TOKEN') | default('') }}"
+    AWS_DEFAULT_REGION: "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+  register: cluster_check
+  ignore_errors: yes
+
+- name: Create cluster if it does not exist
+  command: >
+    kops create cluster --name=petra-hs-cluster.k8s.local --state=s3://petra-kops-state-bucket-12345
+    --zones=us-east-2a,us-east-2b,us-east-2c
+    --control-plane-zones=us-east-2a,us-east-2b,us-east-2c
+    --node-count=3
+    --node-size=t3.medium
+    --control-plane-count=3
+    --control-plane-size=t3.medium
+    --ssh-public-key=/home/ec2-user/.ssh/kops-rsa.pub
+    --cloud-labels="Environment=Prod"
+    --associate-public-ip=false
+    --topology=private
+    --networking=calico
+    --authorization=RBAC
+    --yes
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_SESSION_TOKEN: "{{ lookup('env', 'AWS_SESSION_TOKEN') | default('') }}"
+    AWS_DEFAULT_REGION: "{{ lookup('env', 'AWS_DEFAULT_REGION') }}"
+  when: cluster_check.rc != 0
+
+- name: Get KOPS version
+  command: kops version
+  register: kops_version
+  changed_when: false
+
+- name: Show KOPS version
+  debug:
+    msg: "KOPS version: {{ kops_version.stdout }}"
+
+- name: Get Kubernetes cluster version
+  command: kops get cluster petra-hs-cluster.k8s.local --state=s3://petra-kops-state-bucket-12345 -o json
+  register: cluster_info
+  environment:
+    AWS_ACCESS_KEY_ID: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') }}"
+    AWS_SECRET_ACCESS_KEY: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') }}"
+    AWS_SESSION_TOKEN: "{{ lookup('env', 'AWS_SESSION_TOKEN') | default('') }}"
+
+- name: Parse Kubernetes cluster version
+  set_fact:
+    k8s_cluster_version: "{{ (cluster_info.stdout | from_json).spec.kubernetesVersion }}"
+
+- name: Show Kubernetes cluster version
+  debug:
+    msg: "Kubernetes cluster version: {{ k8s_cluster_version }}"
+
+- name: Get kubectl client version
+  command: kubectl version --client 
+  register: kubectl_version
+
+- name: Show kubectl version
+  debug:
+    msg: "{{ kubectl_version.stdout }}"
+

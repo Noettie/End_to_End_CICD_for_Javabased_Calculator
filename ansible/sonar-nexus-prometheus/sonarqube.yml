@@ -1,0 +1,114 @@
+---
+- name: Install Java 17 and SonarQube with PostgreSQL config
+  hosts: sonarqube
+  become: yes
+
+  vars:
+    # Make sure you define these in your inventory or vars file
+    db_host: "your_postgres_host"
+    db_password: "your_postgres_password"
+
+  tasks:
+    - name: Install Java 17
+      shell: |
+        amazon-linux-extras enable corretto17
+        yum clean metadata
+        yum install -y java-17-amazon-corretto
+      args:
+        executable: /bin/bash
+
+    - name: Create sonarqube user
+      user:
+        name: sonarqube
+        system: yes
+        shell: /bin/bash
+
+    - name: Download SonarQube
+      get_url:
+        url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-25.6.0.109173.zip"
+        dest: /tmp/sonarqube.zip
+        headers:
+          User-Agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.54 Safari/537.36"
+
+    - name: Unzip SonarQube
+      unarchive:
+        src: /tmp/sonarqube.zip
+        dest: /opt/
+        remote_src: yes
+        creates: /opt/sonarqube-25.6.0.109173
+
+    - name: Symlink sonarqube directory
+      file:
+        src: /opt/sonarqube-25.6.0.109173
+        dest: /opt/sonarqube
+        state: link
+
+    - name: Change ownership of SonarQube directory
+      file:
+        path: /opt/sonarqube
+        state: directory
+        recurse: yes
+        owner: sonarqube
+        group: sonarqube
+
+    - name: Configure systemd service for SonarQube
+      copy:
+        dest: /etc/systemd/system/sonarqube.service
+        content: |
+          [Unit]
+          Description=SonarQube service
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=sonarqube
+          Group=sonarqube
+          Environment=JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto
+          ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh start
+          ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
+          Restart=always
+          LimitNOFILE=65536
+          LimitNPROC=4096
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+
+    - name: Configure sonar.properties with PostgreSQL DB connection
+      lineinfile:
+        path: /opt/sonarqube/conf/sonar.properties
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      loop:
+        - { regexp: '^#?sonar.jdbc.url=.*', line: "sonar.jdbc.url=jdbc:postgresql://{{ db_host }}:5432/sonarqube" }
+        - { regexp: '^#?sonar.jdbc.username=.*', line: "sonar.jdbc.username=sonar" }
+        - { regexp: '^#?sonar.jdbc.password=.*', line: "sonar.jdbc.password={{ db_password }}" }
+      notify: Restart sonarqube
+
+    - name: Enable and start SonarQube
+      systemd:
+        name: sonarqube
+        enabled: yes
+        state: started
+
+    - name: Get SonarQube version from running server API
+      uri:
+        url: "http://{{ ansible_host | default(inventory_hostname) }}:9000/api/server/version"
+        return_content: yes
+      register: sonar_version_api
+      ignore_errors: yes
+
+    - name: Show SonarQube version from API
+      debug:
+        msg: "SonarQube version from API: {{ sonar_version_api.content | default('N/A') }}"
+
+  handlers:
+    - name: Reload systemd
+      command: systemctl daemon-reload
+
+    - name: Restart sonarqube
+      systemd:
+        name: sonarqube
+        state: restarted
+

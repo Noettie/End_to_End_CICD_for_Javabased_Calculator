@@ -1,0 +1,122 @@
+---
+- name: Install Nexus Repository Manager
+  hosts: nexus
+  become: yes
+  tasks:
+    - name: Enable Amazon Linux Extras and install Java 11
+      shell: |
+        amazon-linux-extras enable java-openjdk11
+        yum clean metadata
+        yum install -y java-11-openjdk
+      args:
+        executable: /bin/bash
+
+    - name: Create nexus user
+      user:
+        name: nexus
+        system: yes
+        shell: /bin/bash
+
+    - name: Download Nexus OSS
+      get_url:
+        url: "https://download.sonatype.com/nexus/3/nexus-3.81.1-01-linux-x86_64.tar.gz"
+        dest: /tmp/nexus.tar.gz
+        headers:
+          User-Agent: "Mozilla/5.0"
+
+    - name: Extract Nexus
+      unarchive:
+        src: /tmp/nexus.tar.gz
+        dest: /opt/
+        remote_src: yes
+
+    - name: Debug /opt directory content after extraction
+      command: ls -l /opt/
+      register: opt_dir
+      changed_when: false
+
+    - debug:
+        var: opt_dir.stdout_lines
+
+    - name: Find extracted nexus directory
+      shell: ls -d /opt/nexus-*
+      register: nexus_dir_result
+      changed_when: false
+      failed_when: nexus_dir_result.rc != 0
+
+
+    - name: Symlink nexus directory
+      file:
+        src: "{{ nexus_dir_result.stdout }}"
+        dest: /opt/nexus
+        state: link
+
+    - name: Change ownership of Nexus directory
+      file:
+        path: /opt/nexus
+        state: directory
+        recurse: yes
+        owner: nexus
+        group: nexus
+
+    #- name: Configure nexus to run as nexus user
+     # lineinfile:
+      #  path: /opt/nexus/bin/nexus.rc
+       # regexp: '^run_as_user='
+        #line: 'run_as_user="nexus"'
+
+    - name: Create systemd service for Nexus
+      copy:
+        dest: /etc/systemd/system/nexus.service
+        content: |
+          [Unit]
+          Description=nexus service
+          After=network.target
+
+          [Service]
+          Type=forking
+          LimitNOFILE=65536
+          ExecStart=/opt/nexus/bin/nexus start
+          ExecStop=/opt/nexus/bin/nexus stop
+          User=nexus
+          Restart=on-abort
+
+          [Install]
+          WantedBy=multi-user.target
+      notify:
+        - Reload systemd
+
+    - name: Enable and start Nexus
+      systemd:
+        name: nexus
+        enabled: yes
+        state: started
+
+    - name: Wait for Nexus to be available
+      uri:
+        url: "http://{{ inventory_hostname }}:8081/service/rest/v1/status"
+        method: GET
+        status_code: 200
+      register: nexus_status
+      retries: 10
+      delay: 15
+      until: nexus_status.status == 200
+
+    - name: Set Nexus tarball filename 
+      set_fact:
+        nexus_tarball: "nexus-3.81.1-01-unix.tar.gz"
+
+    - name: Extract Nexus version from tarball filename
+      set_fact:
+        nexus_version: "{{ nexus_tarball | regex_search('nexus-(\\d+\\.\\d+\\.\\d+-\\d+)', '\\1') }}"
+
+    - name: Show extracted Nexus version
+      debug:
+        msg: "Nexus Version: {{ nexus_version }}"
+
+
+
+  handlers:
+    - name: Reload systemd
+      command: systemctl daemon-reload
+

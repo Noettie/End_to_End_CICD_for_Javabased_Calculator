@@ -44,3 +44,4 @@ Temporary Items
 
 kubernetes/terraform/terraform.tfstate
 kubernetes/terraform/terraform.tfstate.backup
+terraform/sonar-nexus-monitoring/terraform.tfstate.backup

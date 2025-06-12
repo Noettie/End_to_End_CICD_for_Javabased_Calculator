@@ -1,0 +1,232 @@
+---
+- name: Install SonarQube on SonarQube Server
+  hosts: sonarqube_server
+  become: yes
+  vars:
+    sonar_version: "10.4.1.88267"
+    sonar_user: "sonarqube"
+    sonar_group: "sonarqube"
+    sonar_install_dir: "/opt/sonarqube"
+    sonar_port: 9000
+
+  tasks:
+    - name: Install dependencies for SonarQube
+      yum:
+        name:
+          - java-11-openjdk
+          - unzip
+          - wget
+          - postgresql
+          - postgresql-server
+        state: present
+
+    - name: Initialize PostgreSQL database (only if not initialized)
+      command: /usr/bin/postgresql-setup initdb
+      args:
+        creates: /var/lib/pgsql/data/PG_VERSION
+
+    - name: Start and enable PostgreSQL service
+      service:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Create sonar user and database
+      become_user: postgres
+      postgresql_db:
+        name: sonarqube
+        encoding: UTF8
+        lc_collate: en_US.UTF-8
+        lc_ctype: en_US.UTF-8
+        state: present
+
+    - name: Create sonar database user
+      become_user: postgres
+      postgresql_user:
+        name: sonar
+        password: "StrongPassword123"
+        priv: "sonarqube:ALL"
+        state: present
+
+    - name: Download SonarQube
+      get_url:
+        url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonar_version }}.zip"
+        dest: "/tmp/sonarqube.zip"
+
+    - name: Unzip SonarQube
+      unarchive:
+        src: "/tmp/sonarqube.zip"
+        dest: "/opt"
+        remote_src: yes
+
+    - name: Rename SonarQube directory
+      command: mv /opt/sonarqube-{{ sonar_version }} {{ sonar_install_dir }}
+      args:
+        creates: "{{ sonar_install_dir }}"
+
+    - name: Create sonar user and group
+      user:
+        name: "{{ sonar_user }}"
+        group: "{{ sonar_group }}"
+        create_home: no
+        system: yes
+        shell: /sbin/nologin
+
+    - name: Change ownership of SonarQube directory
+      file:
+        path: "{{ sonar_install_dir }}"
+        owner: "{{ sonar_user }}"
+        group: "{{ sonar_group }}"
+        recurse: yes
+
+    - name: Configure SonarQube database settings
+      lineinfile:
+        path: "{{ sonar_install_dir }}/conf/sonar.properties"
+        regexp: '^#?sonar.jdbc.username='
+        line: "sonar.jdbc.username=sonar"
+      notify: restart sonarqube
+
+    - name: Set sonar.jdbc.password in sonar.properties
+      lineinfile:
+        path: "{{ sonar_install_dir }}/conf/sonar.properties"
+        regexp: '^#?sonar.jdbc.password='
+        line: "sonar.jdbc.password=StrongPassword123"
+      notify: restart sonarqube
+
+    - name: Set sonar.jdbc.url in sonar.properties
+      lineinfile:
+        path: "{{ sonar_install_dir }}/conf/sonar.properties"
+        regexp: '^#?sonar.jdbc.url='
+        line: "sonar.jdbc.url=jdbc:postgresql://localhost/sonarqube"
+      notify: restart sonarqube
+
+    - name: Create systemd service for SonarQube
+      copy:
+        dest: /etc/systemd/system/sonarqube.service
+        content: |
+          [Unit]
+          Description=SonarQube service
+          After=syslog.target network.target
+
+          [Service]
+          Type=simple
+          User={{ sonar_user }}
+          Group={{ sonar_group }}
+          ExecStart={{ sonar_install_dir }}/bin/linux-x86-64/sonar.sh start
+          ExecStop={{ sonar_install_dir }}/bin/linux-x86-64/sonar.sh stop
+          Restart=on-failure
+          LimitNOFILE=65536
+          LimitNPROC=8192
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: reload systemd
+
+    - name: Enable and start SonarQube service
+      systemd:
+        name: sonarqube
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: reload systemd
+      command: systemctl daemon-reload
+
+    - name: restart sonarqube
+      systemd:
+        name: sonarqube
+        state: restarted
+
+---
+
+- name: Install Nexus Repository on Nexus Server
+  hosts: nexus_server
+  become: yes
+  vars:
+    nexus_version: "3.59.0-01"
+    nexus_user: "nexus"
+    nexus_group: "nexus"
+    nexus_install_dir: "/opt/nexus"
+    nexus_data_dir: "/opt/sonatype-work/nexus"
+
+  tasks:
+    - name: Install Java (Nexus requires Java 11+)
+      yum:
+        name: java-11-openjdk
+        state: present
+
+    - name: Create nexus user and group
+      user:
+        name: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+        system: yes
+        shell: /sbin/nologin
+        create_home: no
+
+    - name: Download Nexus Repository Manager
+      get_url:
+        url: "https://download.sonatype.com/nexus/3/nexus-{{ nexus_version }}-unix.tar.gz"
+        dest: "/tmp/nexus.tar.gz"
+
+    - name: Extract Nexus
+      unarchive:
+        src: "/tmp/nexus.tar.gz"
+        dest: "/opt"
+        remote_src: yes
+        creates: "{{ nexus_install_dir }}"
+
+    - name: Rename Nexus directory
+      command: mv /opt/nexus-{{ nexus_version }} {{ nexus_install_dir }}
+      args:
+        creates: "{{ nexus_install_dir }}"
+
+    - name: Change ownership of Nexus directory
+      file:
+        path: "{{ nexus_install_dir }}"
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+        recurse: yes
+
+    - name: Ensure nexus data directory exists
+      file:
+        path: "{{ nexus_data_dir }}"
+        state: directory
+        owner: "{{ nexus_user }}"
+        group: "{{ nexus_group }}"
+
+    - name: Configure Nexus to run as nexus user
+      lineinfile:
+        path: "{{ nexus_install_dir }}/bin/nexus.rc"
+        regexp: '^#?run_as_user='
+        line: "run_as_user={{ nexus_user }}"
+
+    - name: Create systemd service for Nexus
+      copy:
+        dest: /etc/systemd/system/nexus.service
+        content: |
+          [Unit]
+          Description=Nexus Repository Manager
+          After=network.target
+
+          [Service]
+          Type=simple
+          User={{ nexus_user }}
+          Group={{ nexus_group }}
+          ExecStart={{ nexus_install_dir }}/bin/nexus start
+          ExecStop={{ nexus_install_dir }}/bin/nexus stop
+          Restart=on-failure
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: reload systemd
+
+    - name: Enable and start Nexus service
+      systemd:
+        name: nexus
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: reload systemd
+      command: systemctl daemon-reload
+
